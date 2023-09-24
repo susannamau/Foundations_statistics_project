@@ -1,0 +1,658 @@
+---
+title: "Progetto finale corso di Foundations of Probability and Statistics"
+author: "Susanna Maugeri, Corinna Strada"
+date: "29/10/2021"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+# Introduzione
+
+Il dataset considerato, reperito su Kaggle, è disponibile al seguente [**link**](https://www.kaggle.com/prathamtripathi/regression-with-neural-networking). Contiene dei dati su diverse composizioni di cemento e si compone di 9 variabili e 1030 osservazioni.
+
+Le variabili di interesse sono:
+
+* _Cement_: quantità di cemento, unità di misura $kg/m^{3}$ di miscela;
+
+* _Blast Furnace Slag_: quantità di scorie in altoforno, unità di misura $kg/m^{3}$ di miscela;
+
+* _Fly Ash_: quantità di cenere, unità di misura $kg/m^{3}$ di miscela;
+
+* _Water_: quantità d'acqua, unità di misura $kg/m^{3}$ di miscela;
+
+* _Superplasticizer_: quantità di superfluidificante, additivo in grado di ridurre la quantità d'acqua necessaria, unità di misura $kg/m^{3}$ di miscela;
+
+* _Coarse Aggregate_: aggregato grossolano, unità di misura $kg/m^{3}$ di miscela;
+
+* _Fine Aggregate_: aggregato fine, unità di misura $kg/m^{3}$ di miscela;
+
+* _Age_: numero di giorni dopo i quali si testa la miscela, unità di misura: giorni 1~365;
+
+* _Concrete Compressive Strength_: resistenza del calcestruzzo alla compressione, unità di misura $MPa$.
+
+Per il task di regressione su cui ci concentreremo considereremo la variabile _Concrete Compressive Strength_ come target e tutte le altre come regressori.
+
+
+# Importazione del dataset e controlli preliminari
+
+```{r echo=FALSE}
+concrete <- read.table("concrete_data.csv", header = TRUE, sep = ",")
+head(concrete)
+```
+
+L'importazione è andata a buon fine.
+
+Stampiamo un primo sommario delle variabili per verificare il numero di valori mancanti e se sono presenti variabili degeneri:
+
+```{r echo=FALSE}
+library('funModeling')
+stato=df_status(concrete, print_results=F)
+stato
+```
+
+Nessuna variabile presenta valori mancanti e tutte sono di tipo numerico.
+
+Calcoliamo le statistiche descrittive principali per le variabili del dataset e la matrice di correlazione.
+
+```{r echo=FALSE}
+summary(concrete)
+```
+
+```{r echo=FALSE}
+library(psych)
+psych::describe(concrete)
+```
+
+Per ogni variabile sono riportate le statistiche descrittive più importanti.
+Notiamo in particolare che tutte le variabili, ad accezione di _Age_, non presentano asimmetrie particolarmente importanti.
+La simmetria massima si registra relativamente a _Coarse.Aggregate_ (-0.04) e quell'attributo, insieme a _Fine.Aggregate_, è l'unico a presentare un valore dell'indice negativo. La massima asimmetria, di tipo positivo, si registra invece per la variabile _Age_, la quale infatti presenta valori di media aritmetica e mediana molto distanti tra di loro.
+
+Per quanto riguarda la curtosi, anche in questo caso il  valore massimo è registrato da _Age_ ed è pari a 12.07.Ciò significa che essa ha code definite come "pesanti" e la sua distribuzione è leptocurtica.
+Tutti gli altri valori non si distaccano troppo dallo 0, quindi le altre variabili sembrano presentare una distribuzione che ha una forma non troppo differente da quella normale per asimmetria.
+
+Plottiamo la matrice dei diagrammi di dispersione per avere una idea sulla distribuzione delle variabili e successivamente la matrice di correlazione.
+
+```{r}
+pairs(concrete)
+```
+A causa del numero elevato di variabili e di osservazioni, è difficile osservare la distribuzione dei punti nei grafici, per questo produciamo la matrice di correlazione.
+
+```{r echo=FALSE}
+res <- cor(concrete)
+#round(res, 2) 
+library('corrplot')
+corrplot(res, type = "upper", order = "hclust", addCoef.col ='black',
+         tl.col = "black", tl.srt = 45)
+```
+
+Dalla matrice di correlazione si può vedere che le variabili _Water_ e _Superplasticizer_ presentano una correlazione negativa e piuttosto elevata, pari a -0.66, così come _Fine.Aggregate_ e _Water_ pari a 0.45. Le variabili più correlate con il target _Strength_ sono _Cement_ (0.5), _Superplasticizer_ e  _Age_ (0.33): si può dunque ipotizzare, ad una prima superficiale analisi, che il calcestruzzo tenda ad essere maggiormente resistente alla compressione se viene utilizzata una maggior quantità di cemento e una minore  di superfluidificante e in generale al passare del tempo.
+
+
+# Analisi delle variabili
+
+Per ciascuna variabile vengono prodotti il boxplot, l'istogramma, il plot della funzione di ripartizione empirica e il QQ-plot e infine viene effettuato il test di Shapiro-Wilk per testare l'ipotesi di normalità delle loro distribuzioni.
+
+## Variabile _Cement_
+
+```{r echo=FALSE}
+par(mfrow=c(1,3))
+boxplot(concrete$Cement, main='Boxplot')
+
+hist(concrete$Cement,
+     breaks = seq(min(concrete$Cement), max(concrete$Cement), length.out=12),
+     main='Histogram',
+     freq = FALSE,
+     xlim = c(100,600), ylim=c(0,0.005))
+lines(density(concrete$Cement))
+
+plot(ecdf(concrete$Cement), do.points=FALSE, main='ECDF')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+qqnorm(concrete$Cement, main = "QQ-plot of Cement")
+qqline(concrete$Cement)
+```
+
+La distribuzione di _Cement_ risulta leggermente asimmetrica a destra, come già in precedenza osservato. Infatti, nel summary del dataframe si osserva che la mediana è maggiore della media di pochi punti e che esse si trovano non centrate rispetto al primo e al terzo quartile della distribuzione. Dal boxplot non risultano esserci valori inusuali, all'infuori cioò dei baffi che rappresentano il Range Interquartile.
+
+
+```{r echo=FALSE}
+shapiro.test(concrete$Cement)
+```
+
+Il QQ-plot ed il test di Shapiro-Wilk confermano l'ipotesi di non normalità: le code della distribuzione, specialmente quella di sinistra, risultano molto spostate rispetto ai quantili teorici.
+
+
+## Variabile _Blast.Furnace.Slag_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Blast.Furnace.Slag)$stats[1]
+sup <- boxplot.stats(concrete$Blast.Furnace.Slag)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Blast.Furnace.Slag, main='Boxplot')
+
+hist(concrete$Blast.Furnace.Slag,
+     breaks = seq(min(concrete$Blast.Furnace.Slag), max(concrete$Blast.Furnace.Slag), length.out=6),
+     main='Histogram',
+     freq = FALSE,
+     xlim = c(000,400), ylim=c(0, 0.008))
+lines(density(concrete$Blast.Furnace.Slag))
+plot(ecdf(concrete$Blast.Furnace.Slag), do.points=FALSE, main='ECDF')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+outliers <- concrete[(concrete$Blast.Furnace.Slag<inf)|(concrete$Blast.Furnace.Slag>sup),]
+#outliers
+```
+
+Nel Boxplot si osserva un pallino fuori dal baffo di destra, ad un'analisi più dettagliata abbiamo scoperto che si tratta in realtà di due osservazioni, la 554 e la 560, che presentano il medesimo valore 359.4 per questa variabile.
+
+```{r echo=FALSE}
+qqnorm(concrete$Blast.Furnace.Slag, main = "QQ-plot of Blast.Furnace.Slag")
+qqline(concrete$Blast.Furnace.Slag)
+```
+
+La distribuzione di _Blast Furnace Slag_ risulta abbastanza asimmetrica a destra. Anche in questo caso ciò era intuibile dai quantili calcolati precedentemente: il primo quartile ha valore 0, perciò almeno il 25% dei dati presenta valore nullo. Tuttavia dal plot della funzione di ripartizione empirica si nota che più del 40% dei dati in realtà presenta valore nullo. Inoltre dal boxplot si vede che la variabile presenta un'osservazione outlier nell coda destra della distribuzione.
+
+```{r echo=FALSE}
+shapiro.test(concrete$Blast.Furnace.Slag)
+```
+
+Il QQ-plot e il test di Shapiro-Wilk confermano l'ipotesi di non normalità della variabile.
+
+
+## Variabile _Fly.Ash_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Fly.Ash)$stats[1]
+sup <- boxplot.stats(concrete$Fly.Ash)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Fly.Ash, main='Boxplot of Fly.Ash')
+#mtext(paste("Outliers: ", paste(out, collapse = ", ")))
+
+hist(concrete$Fly.Ash, breaks = seq(min(concrete$Fly.Ash), max(concrete$Fly.Ash), length.out=9), main='Histogram of Fly.Ash', freq = FALSE, xlim = c(0,200), ylim=c(0, 0.025))
+lines(density(concrete$Fly.Ash))
+plot(ecdf(concrete$Fly.Ash), do.points=FALSE, main='ECDF of Fly.Ash')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+qqnorm(concrete$Fly.Ash, main = "QQ-plot of Fly.Ash")
+qqline(concrete$Fly.Ash)
+```
+
+```{r echo=FALSE}
+shapiro.test(concrete$Fly.Ash)
+```
+
+La distribuzione di _Fly Ash_ risulta molto asimmetrica a destra. Dai quantili calcolati infatti si legge che più della metà dei dati presenta valore nullo; in effetti dalla funzione di ripartizione empirica si vede che quasi il 60% dei dati ha valore nullo. Dall'istogramma si vede che la variabile ha una distribuzione molto particolare: una decisa prevalenza di valori nulli e una distribuzione dei valori non nulli a sua volta asimmetrica leggermente a destra. Il Boxplot mostra che non vi sono valori che si posizionano all'infuori del Range Interquartile.
+Anche questa volta il QQ-plot e il test di Shapiro-Wilk confermano che la  variabile non ha un andamento normale.
+
+
+## Variabile _Water_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Water)$stats[1]
+sup <- boxplot.stats(concrete$Water)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Water, main='Boxplot of Water')
+
+hist(concrete$Water, breaks = seq(min(concrete$Water), max(concrete$Water), length.out=10), main='Histogram of Water', freq = FALSE, xlim = c(100,250), ylim=c(0, 0.021))
+lines(density(concrete$Water))
+plot(ecdf(concrete$Water), do.points=FALSE, main='ECDF of Water')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+outliers <- concrete[(concrete$Water<inf)|(concrete$Water>sup),]
+#outliers
+```
+Il Boxplot mostra che vi sono dei valori all'infuori del Range Interquartile sia nella coda di destra che in quella di sinistra. Ad un'analisi più approfondita abbiamo scoperto che si tratta delle osservazioni dalla 225 alla 229 per la coda di sinistra, che presentano tutte un valore di _Water_ pari a 121.8, e delle 863, 874, 937 e 1020 per la coda di destra. Dall'istogramma la variabile sembra essere leggermente asimmetrica a sinistra.
+
+```{r echo=FALSE}
+qqnorm(concrete$Water, main = "QQ-plot of Water")
+qqline(concrete$Water)
+```
+```{r echo=FALSE}
+shapiro.test(concrete$Water)
+```
+
+Il QQ-plot mostra che la variabile ha un andamento quasi normale, ad eccezione della coda di destra in cui i quantili osservati e teorici differiscono notevolmente.
+
+
+## Variabile _Superplasticizer_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Superplasticizer)$stats[1]
+sup <- boxplot.stats(concrete$Superplasticizer)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Superplasticizer, main='Boxplot of Superplasticizer')
+
+hist(concrete$Superplasticizer, breaks = seq(min(concrete$Superplasticizer), max(concrete$Superplasticizer), length.out=11), main='Histogram of Superplasticizer', freq = FALSE, xlim = c(0,35), ylim=c(0, 0.12))
+lines(density(concrete$Superplasticizer))
+
+plot(ecdf(concrete$Superplasticizer), do.points=FALSE, main='ECDF of Superplasticizer')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+outliers <- concrete[(concrete$Superplasticizer<inf)|(concrete$Superplasticizer>sup),]
+#outliers
+```
+
+Anche la variabile _Superplasticizer_ risulta, in distribuzione, asimmetrica a destra. Il boxplot mostra, oltre all'asimmetria, anche che vi sono nella coda di destra dei valori outliers: si osservano due palline fuori dal baffo; ad un'analisi più approfondita risulta che si tratta di 10 osservazioni, delle quali 5 presentano un valore di _Superplasticizer_ pari a 28.2 e 5 un valore di 32.2. Il plot della funzione di ripartizione empirica, infine, mostra che quasi il 40% dei dati ha valore nullo.
+
+```{r echo=FALSE}
+qqnorm(concrete$Superplasticizer, main = "QQ-plot of Superplasticizer")
+qqline(concrete$Superplasticizer)
+```
+
+Anche per questa variabile il QQ-plot mostra un andamento totalmente non normale.
+
+```{r echo=FALSE}
+shapiro.test(concrete$Superplasticizer)
+```
+
+Il test di Shapiro-Wilk conferma l'ipotesi di non normalità fatta osservando i grafici precedenti.
+
+
+## Variabile _Coarse.Aggregate_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Coarse.Aggregate)$stats[1]
+sup <- boxplot.stats(concrete$Coarse.Aggregate)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Coarse.Aggregate, main='Boxplot of Coarse.Aggregate')
+
+hist(concrete$Coarse.Aggregate, breaks = seq(min(concrete$Coarse.Aggregate), max(concrete$Coarse.Aggregate), length.out=9), main='Histogram of Coarse.Aggregate', freq = FALSE, xlim = c(800, 1150), ylim=c(0, 0.007))
+lines(density(concrete$Coarse.Aggregate))
+plot(ecdf(concrete$Coarse.Aggregate), do.points=FALSE, main='ECDF of Coarse.Aggregate')
+par(mfrow=c(1,1))
+```
+
+
+
+```{r echo=FALSE}
+qqnorm(concrete$Coarse.Aggregate, main = "QQ-plot of Coarse.Aggregate")
+qqline(concrete$Coarse.Aggregate)
+```
+
+Dai grafici bBxplot e Istogramma la variabile sembra essere abbastanza simmetrica, tuttavia il QQ-plot confuta questa idea mostrando un andamento che non coincide con quello normale. Il Boxplot mostra inoltre che non ci sono valori che si posizionano fuori dal Range Interquartile.
+
+```{r echo=FALSE}
+shapiro.test(concrete$Coarse.Aggregate)
+```
+
+Anche in questo caso il test di Shapiro-Wilk conferma la non normalità della distribuzione.
+
+
+## Variabile _Fine.Aggregate_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Fine.Aggregate)$stats[1]
+sup <- boxplot.stats(concrete$Fine.Aggregate)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Fine.Aggregate, main='Boxplot of Fine.Aggregate')
+
+hist(concrete$Fine.Aggregate, breaks = seq(min(concrete$Fine.Aggregate), max(concrete$Fine.Aggregate), length.out=10), main='Histogram of Fine.Aggregate', freq = FALSE, xlim = c(550, 1050), ylim=c(0, 0.007))
+lines(density(concrete$Fine.Aggregate))
+
+plot(ecdf(concrete$Fine.Aggregate), do.points=FALSE, main='ECDF of Fine.Aggregate')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+outliers <- concrete[(concrete$Fine.Aggregate<inf)|(concrete$Fine.Aggregate>sup),]
+#outliers
+```
+
+Il Boxplot mostra un pallino fuori dal baffo di destra, in realtà si tratta di 5 osservazioni che presentano il medesimo valore 992.6 per la variabile considerata.
+
+```{r echo=FALSE}
+qqnorm(concrete$Fine.Aggregate, main = "QQ-plot of Fine.Aggregate")
+qqline(concrete$Fine.Aggregate)
+```
+
+```{r echo=FALSE}
+shapiro.test(concrete$Fine.Aggregate)
+```
+
+Dall'istogramma la variabile sembra essere leggermente asimmetrica a sinistra, mentre dal QQ-plot si vede che la coda di sinistra è molto spostata rispetto ai quantili teorici della normale. Infine, con il test di Shapiro-Wilk viene confermato che la variabile non ha un andamento normale.
+
+
+## Variabile _Age_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Age)$stats[1]
+sup <- boxplot.stats(concrete$Age)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Age, main='Boxplot of Age')
+
+hist(concrete$Age, breaks = seq(min(concrete$Age), max(concrete$Age), length.out=10), main='Histogram of Age', freq = FALSE, xlim = c(0,400), ylim=c(0, 0.02))
+lines(density(concrete$Age))
+plot(ecdf(concrete$Age), do.points=FALSE, main='ECDF of Age')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+outliers <- concrete[(concrete$Age<inf)|(concrete$Age>sup),]
+outliers
+```
+
+I grafici per la variabile _Age_ mostrano è essa è molto asimmetrica a destra e che la quasi totalità delle osservazioni presenta valori minori di 120, che è anche il valore estremo del baffo di destra del Boxplot. I valori fuori dal baffo rappresentano 59 osservazioni che riportano per la variabile i valori 180, 270, 360 e 365.
+
+```{r echo=FALSE}
+qqnorm(concrete$Age, main = "QQ-plot of Age")
+qqline(concrete$Age)
+```
+
+Il QQ-plot conferma sia l'ipotesi iniziale che la variabile non presenti assolutamente un andamento normale. Si notano dei segmenti orizzontali a causa del fatto che la variabile sia discreta e non continua.
+
+```{r echo=FALSE}
+shapiro.test(concrete$Age)
+```
+
+Il bassissimo valore del p-value conferma l'ipotesi di non normalità della variabile.
+
+
+## Variabile _Strength_
+
+```{r echo=FALSE}
+inf <- boxplot.stats(concrete$Strength)$stats[1]
+sup <- boxplot.stats(concrete$Strength)$stats[5]
+
+par(mfrow=c(1,3))
+boxplot(concrete$Strength, main='Boxplot of Strength')
+
+hist(concrete$Strength, breaks = seq(min(concrete$Strength), max(concrete$Strength), length.out=12), main='Histogram of Strength', freq = FALSE, xlim = c(0,100), ylim=c(0, 0.025))
+lines(density(concrete$Strength))
+
+plot(ecdf(concrete$Strength), do.points=FALSE, main='ECDF of Strength')
+par(mfrow=c(1,1))
+```
+
+```{r echo=FALSE}
+outliers <- concrete[(concrete$Strength<inf)|(concrete$Strength>sup),]
+outliers
+```
+
+```{r echo=FALSE}
+qqnorm(concrete$Strength, main = "QQ-plot of Strength")
+qqline(concrete$Strength)
+```
+
+Infine, anche la variabile _Strength_ risulta asimmetrica a destra, con 4 outliers nella coda di destra visibili nel Boxplot, che sono le osservazioni 1, 154, 182 e 382. Il QQ-plot mostra tuttavia un andamento abbastanza normale, ad eccezione delle code.
+
+```{r echo=FALSE}
+shapiro.test(concrete$Strength)
+```
+
+Tuttavia, poiché il test di Shapiro-Wilk indica che l'ipotesi di normalità sia da rifiutare, vuol dire che le code hanno un peso notevole nella distribuzione, che risulta infatti non normale.
+
+
+## Diagrammi di dispersione dei singoli predittori rispetto alla variabile risposta
+
+Plottiamo ora i diagrammi di dispersione dei singoli predittori rispetto alla variabile risposta _Strength_.
+
+```{r echo=FALSE}
+attach(concrete)
+par(mfrow=c(2,2))
+plot(Cement, Strength)
+plot(Blast.Furnace.Slag, Strength ) 
+plot(Fly.Ash, Strength )
+plot(Water, Strength )
+plot(Superplasticizer, Strength )
+plot(Coarse.Aggregate, Strength )
+plot(Fine.Aggregate, Strength )
+plot(Age, Strength )
+par(mfrow=c(1,1))
+detach(concrete)
+```
+
+Sembra non esserci alcun tipo di legame lineare tra le singole variabili e la risposta, eccezion fatta per la covariata _Cement_. In quel caso, si registra una relazione lineare di tipo positivo: all'aumentare del valore di _Cement_, anche _Strength_ sembra aumentare e viceversa, come notato precedentemente nella matrice di correlazione, dove la correlazione tra le due variabili si mostrava essere pari a 0.5. Si nota poi una leggera correlazione negativa tra la variabile _Water_ e la variabile risposta; anche questa relazione era stata precedentemente notata nella matrice di correlazione, che presentava per queste due variabili un coefficiente pari a -0.29.
+
+I grafici sono indicativi solo della relazione fra la variabile risposta e ciascuna delle variabili esplicative, ma non danno informazione globale sulla dipendenza della risposta da tutte le variabili esplicative considerate simultaneamente.
+È importante considerare anche la possibile dipendenza tra coppie di variabili esplicative, ma ciò viene tenuto in considerazione nella matrice di correlazione.
+
+
+# Costruzione del modello di regressione lineare multipla
+
+Per la costruzione del miglior modello di regressione lineare, abbiamo suddiviso il dataset in due parti, il training set e il test set.
+Il training set contiene l'80% delle osservazioni del dataset iniziale e viene utilizzato per il fitting dei modelli.
+Il test set, invece, contiene la rimanente parte di osservazioni e su di esso sono stati applicati i modelli generati al fine di fare diverse considerazioni sui valori che essi predicono.
+
+Prima di effettuare la partizione scegliamo un seed pari a 1234 per rendere possibile l'esatta replicazione del risultato.
+
+```{r echo=FALSE}
+library(caret)
+set.seed(1234) ##aggiungo il seme per avere risultati replicabili
+index <- createDataPartition(concrete$Strength, p = .80, list = FALSE)
+train <- concrete[index, ]
+test <- concrete[-index, ]
+
+dim(train) 
+dim(test)
+```
+
+Con questa suddivisione otteniamo un training set con 826 osservazioni ed un test set che ne comprende 204.
+
+Il primo modello fittato, chiamato mod1, è quello completo, che utilizza cioè tutte le covariate. Lo stimiamo col metodo _lm_ di _R_ e poi stampiamo il relativo summary.
+
+```{r echo=FALSE}
+mod1 <- lm(Strength ~ ., data = train)
+summary(mod1)
+```
+
+Tutte le variabili indipendenti risultano molto significative, tranne _Coarse.Aggregate_ e _Fine.Aggregate_, che lo sono poco. L'$R^2$ e l'$R^2_{adj}$ risultano intorno al valore 0.61, e reputiamo questo valore come limite della sufficienza. Ciò significa che il modello spiega il 61% della variabilità della variabile risposta.
+
+Inoltre, il p-value del test $H0: i\ coefficienti\ sono\ tutti\ pari\ a\ zero$ vs. $H1: almeno\ un\ coefficiente\ è\ diverso\ da\ zero$ è molto piccolo, stando a significare che almeno un coefficiente per i predittori considerati è significatamente diverso da zero.
+
+Vediamo ore le diagnostiche grafiche dei residui del modello.
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(mod1)
+par(mfrow=c(1,1))
+```
+
+Il primo grafico, _Residuals vs Fitted_, rappresenta il diagramma a dispersione dei residui verso i valori predetti. Questi ultimi sembrano essere disposti in maniera casuale intorno alla retta x=0 e non sono quindi presenti pattern evidenti, anche se si nota un'addensamento dei punti per i valori fittati minori di 40.
+
+Il secondo grafico, il diagramma quantile-quantile dei residui standardizzati, ci suggerisce che è ragionevole pensare che la distribuzione degli errori del modello sia di tipo normale. Infatti, gli scostamenti dei valori dalla bisettrice del 1° e 3° quadrante non sembrano particolarmente importanti.
+
+Il terzo grafico, _Scale Location_, individua una situazione di possibile eteroschedasticità: si nota infatti anche in questo grafico un addensamento dei punti per i valori più bassi dei Fitted Values.
+
+Tramite il test di Breusch-Pagan si può verificare formalmente l'ipotesi di omoschedasticità dei residui del modello. Le ipotesi del test sono: $H0:\ la\ varianza\ degli\ errori\ è\ costante$ vs $H1:\ la\ varianza\ degli\ errori\ non\  è\ costante$.
+
+```{r echo=FALSE}
+library(lmtest)
+bptest(mod1)
+```
+
+Il basso p-value per questo test mostra che effettivamente non ci si trova in una situazione di omoschedasticità dei residui.
+
+L'ultimo grafico, _Residuals vs Leverage_, mostra le Distanze di Cook; è possibile notare quali sono le osservazioni che hanno una particolare influenza sul modello di regressione. 
+In questo caso, esse si tratta delle osservazioni 77, 611 e 225. Poiché i valori influenti pesano nella stima dei coefficienti del modello, decidiamo di eliminarli e di fittare nuovamente lo stesso modello per osservare se vi sono miglioramenti.
+
+Procediamo dunque con la rimozione dei valori che hanno distanza di Cook maggiore della soglia ocnsigliata in letteratura $4/n$ dove $n$ è il numero di osservazioni.
+
+```{r echo=FALSE}
+cooksd <- data.frame(cooks.distance(mod1))
+cutoff <- 4/nrow(train)
+train <- train[cooksd < cutoff, ]
+dim(train)
+```
+
+La dimensione di _train_ è passata da 826 a 758, quindi sono state eliminate 68 osservazioni influenti.
+
+Vediamo il nuovo fitting del modello completo.
+
+```{r echo=FALSE}
+mod2 <- lm(Strength ~ ., data = train)
+summary(mod2)
+```
+
+Notiamo che il valore di $R^2_{adj}$ è notevolmente migliorato arrivando a 0.75. Notiamo inoltre che la significatività delle variabili _Coarse.Aggregate_ e _Fine.Aggregate_ è migliorata, mentre quella dell'intercetta è rimasta molto bassa. Osserviamo i plot di diagnostica per questo modello.
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(mod2)
+par(mfrow=c(1,1))
+```
+
+Il _Normal Q-Q Plot_ rimane molto buono, lo _Scale-Location_ sembra essere migliorato poiché si nota meno l'addensamento vicibile nelle diagnostiche del modello precedente, mentre nel _Residual vs Fitted_ si nota ancora lo stesso addensamento di punti per i valori fittati minori di 40 e nel _Residual vs Leverage_ si notano ancora dei punti distanti dalla nuvola, tuttavia evidentemente si tratta di punti con Leverage elevato ma non superiore alla soglia.
+
+Fittiamo ora un modello che non comprende l'intercetta, poiché questa nell'ultimo modello risultava non significativa.
+
+```{r echo=FALSE}
+mod3 <- lm(Strength ~ . -1, data = train)
+summary(mod3)
+```
+
+Il modello ottenuto sembra essere molto soddisfacente: tutti i parametri sono molto significativi 8quello che lo è meno è _Superplasticizer_ ad un livello di significatività dello 0.002), l'$R^2_{adj}$ raggiunge un valore molto elevato, pari a 0.956.
+
+Visualizziamo i plot di diagnostica dei residui:
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(mod3)
+par(mfrow=c(1,1))
+```
+
+La situazione dei residui non si è modificata rispetto al modello che comprendeva anche l'intercetta.
+
+
+# Scelta del modello migliore
+## Criterio di Akaike
+
+Per i risultati ottenuti il modello migliore tra quelli fittati da noi sembra essere l'ultimo, il _mod3_, tuttavia decidiamo di utilizzare il metodo di Akaike per verificare formalmente ciò che abbiamo ipotizzato osservando le statistiche di adattamento, i t-test per i coefficienti e i grafici dei residui.
+
+```{r echo=FALSE}
+library(AICcmodavg)
+
+models <- list(mod1, mod2, mod3)
+model_names <- c('mod1', 'mod2', 'mod3')
+
+aictab(cand.set= models, modnames = model_names)
+```
+
+* K rappresenta il numero di parametri nel modello;
+
+* AICc è l'information score del modello. La _c_ minuscola indica che il valore è stato calcolato con un test AIC corretto per campioni di piccole dimensioni. Minore è questo valore, migliore è il modello;
+
+* Delta_AICc è la differenza tra lo score di ciascun modello con quello del modello migliore;
+
+* AICcWt: AICc weight, che è la proporzione relativa al modello preso in esame del potere predittivo totale fornito dal set completo di modelli 
+
+* Cum.Wt è la somma cumulata dei pesi AICc;
+
+* LL è la Log-likelihood. Questo valore dà un'indicazione circa quanto il modello sia verosimile, dati i dati.
+
+In effetti il terzo modello risulta, per i parametri considerati dal metodo di Akaike, solo leggermente migliore del secondo. Considerando anche il miglior indice di adattamento $R^2_{adj}$ scegliamo di considerare il terzo modello come quello migliore.
+
+
+Partendo dal modello individuato, utilizziamo la tecnica dello stepAIC per verificare se ci sono modelli che noi non abbiamo considerato migliori del nostro nella spiegazione dell'andamento di _Strength_. Applichiamo dunque il processo con l'opzione $direction =\ 'both'$, che lo rende una procedura a passi basata su aggiunte o eliminazioni di variabili seguendo il criterio di informazione di Akaike (AIC).
+
+```{r echo=FALSE}
+require(MASS)
+fitC = stepAIC(mod3, direction = "both")
+```
+
+In questo caso vediamo che il modello che noi abbiamo fittato, fit3, anche secondo il metodo di Akaike è il migliore, poiché questo non apporterebbe alcuna modifica per migliorarlo ulteriormente.
+
+
+## Confronto di modelli annidati tramite Anova
+
+Un'altro metodo che si può utilizzare per il confronto di modelli è il test Anova. Possiamo utilizzarlo in questo caso perché uno dei due modelli presenta una selezione di regressori dell'altro, perché si tratta cioè di modelli annidati. Possiamo confrontare tra loro con questo metodo solo il _mod2_ e il _mod3_, poiché il _mod1_ non è stato fittato sugli stessi dati (il dataset conteneva ancora i valori anomali).
+
+```{r echo=FALSE}
+anova(mod2, mod3)
+```
+
+Il test Anova mostra che non ci sono evidenze empiriche per rifiutare con un'opportuna significatività l'ipotesi che il _mod2_ sia migliore del _mod3_. Tuttavia il modello che presenta la Residual Sum of Squares è il terzo, che per questo potremmo considerare leggermente migliore.
+
+
+# Prediction sul test set
+
+Con la funzione _predict_ utilizziamo il terzo modello per stimare i valori del target del test set e uniamo la colonna dei valori previsti al dataframe di test.
+
+```{r echo=FALSE}
+predicted <- predict(mod3, test[,1:8])
+#length(predicted)
+test <- cbind(test, predicted)
+#dim(test)
+```
+Plottiamo infine i valori osservati e i valori predetti dal modello da noi stimato:
+
+```{r echo=FALSE}
+plot(test$Strength,
+    test$predicted,
+     xlab = "Observed Values",
+     ylab = "Predicted Values")
+
+abline(a = 0,
+       b = 1,
+       col = "red",
+       lwd = 2)
+
+grid(nx = NULL, col = "lightgray", lty = "dotted",
+     lwd = par("lwd"), equilogs = TRUE)
+```
+
+Questo plot mostra che il modello sembra predire abbastanza bene i valori della variabile target _Strength_.
+
+Un campione di osservazioni del test set è riportato di seguito:
+
+```{r echo=FALSE}
+test[c(15,17,18,62,83),]
+```
+
+
+# Curiosità: la media di _Strength_ nei primi 30 giorni dalla posa del calcestruzzo è diversa dalla media di _Strength_ nel periodo successivo?
+
+Per concludere, applichiamo un test d'ipotesi per rispondere alla domanda che ci siamo poste. Considerando il dataset completo _Concrete_, dividiamo la variabile _Age_ in due gruppi che comprendono le osservazioni dei primi 30 giorni e quelle dei giorni successivi.
+Il sistema di ipotesi è: $H0:\ la\ media\ di\ Strength\ nei\ due\ gruppi\ è\ uguale$ vs $H1:\ la\ media\ di\ Strength\ nei\ due\ gruppi\ è\ diversa$.
+
+Definiamo una nuova variabile binaria _primo_mese_ che presenta valore 1 se Age è minore o uguale a 30 e 0 altrimenti.
+
+```{r echo=FALSE}
+primo_mese <- ifelse(concrete$Age < 31, 1, 0)
+concrete <- cbind(concrete, primo_mese)
+s_1 <- concrete[concrete['primo_mese' ==1], 'Strenght']
+s_0 <- concrete[concrete['primo_mese' ==0], 'Strenght']
+```
+
+Plottiamo la variabile _Strength_ stratificata per _primo_mese_:
+
+```{r echo=FALSE}
+boxplot(concrete$Strength ~ concrete$primo_mese,
+        xlab = 'primo_mese', ylab='Strength')
+```
+
+Applichiamo il test t per due campioni, ipotizzando che la varianza tra i due campioni sia la stessa visto che le osservazioni sono state estratte dalla medesima variabile casuale:
+
+```{r}
+t.test(concrete$Strength ~ concrete$primo_mese, var.equal=TRUE, conf.level=0.95)
+```
+
+Il valore molto piccolo di p-value suggerisce che la differenza delle medie dei due gruppi sia significativamente diversa.
+
+
+
+
+
+
+
+
+
+
+
